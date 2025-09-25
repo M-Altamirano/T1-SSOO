@@ -94,3 +94,19 @@ double compute_effective_priority_value_for_process(
 
   return priority_value;
 }
+
+bool push_process_into_process_pool(
+  ProcessPool* q,
+  Process* p
+) {
+  if (!q || !p) return false;
+  if (q->internal_dynamic_array_size == q->internal_dynamic_array_capacity) {
+    size_t new_cap = (q->internal_dynamic_array_capacity == 0) ? 8 : (q->internal_dynamic_array_capacity * 2);
+    Process** new_arr = (Process**)realloc(q->internal_dynamic_array_of_process_pointers, new_cap * sizeof(Process*));
+    if (!new_arr) return false;
+    q->internal_dynamic_array_of_process_pointers = new_arr;
+    q->internal_dynamic_array_capacity = new_cap;
+  }
+  q->internal_dynamic_array_of_process_pointers[q->internal_dynamic_array_size++] = p;
+  return true;
+}

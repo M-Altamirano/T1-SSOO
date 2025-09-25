@@ -4,6 +4,7 @@
 #include "io.h"
 #include "queue.h"
 #include "events.h"
+#include "process.h"
 #include <stdbool.h>
 
 typedef struct CpuExecutionUnit {
@@ -18,6 +19,10 @@ typedef struct SimulationContext {
   // Colas MLFQ:
   ProcessQueue high_priority_mlfq_queue;
   ProcessQueue low_priority_mlfq_queue;
+
+  // Pools de FINISHED y RUNNING
+  ProcessPool finished_processes;
+  ProcessPool dead_processes;
 
   // CPU:
   CpuExecutionUnit cpu_execution_unit;

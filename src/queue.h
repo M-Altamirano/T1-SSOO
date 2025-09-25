@@ -30,6 +30,12 @@ bool push_ready_process_into_process_queue(
   Process* process_pointer
 );
 
+// Elimina un proceso de la lista
+void remove_process_from_queue(
+  ProcessQueue* queue_pointer,
+  size_t index
+);
+
 // Devuelve y elimina el proceso de mayor prioridad (según fórmula y PID),
 // o NULL si la cola está vacía.
 Process* pop_best_ready_process_from_process_queue(

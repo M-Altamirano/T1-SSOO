@@ -52,6 +52,18 @@ bool push_ready_process_into_process_queue(
   return true;
 }
 
+// Elimina un proceso de la lista
+void remove_process_from_queue(
+  ProcessQueue* queue_pointer,
+  size_t index
+) {
+  for (size_t i = index; i < queue_pointer->internal_dynamic_array_size; ++i) {
+    queue_pointer->internal_dynamic_array_of_process_pointers[i - 1] =
+        queue_pointer->internal_dynamic_array_of_process_pointers[i];
+  }
+  queue_pointer->internal_dynamic_array_size--;
+}
+
 static int compare_process_pointers_by_effective_priority_then_pid(
   const void* a,
   const void* b,

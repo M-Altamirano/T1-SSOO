@@ -50,6 +50,14 @@ typedef struct Process {
   long long last_tick_when_priority_was_computed;
 } Process;
 
+typedef struct ProcessPool {
+  char* queue_human_readable_name;
+
+  Process** internal_dynamic_array_of_process_pointers;
+  size_t internal_dynamic_array_size;
+  size_t internal_dynamic_array_capacity;
+} ProcessPool;
+
 // Constructor básico a partir de los valores del input:
 Process* create_process_from_input_line(
   const char* input_process_name,
@@ -71,6 +79,11 @@ void initialize_process_simulation_fields(Process* process_pointer);
 double compute_effective_priority_value_for_process(
   const Process* process_pointer,
   long long current_simulation_tick
+);
+
+bool push_process_into_process_pool(
+  ProcessPool* q,
+  Process* p
 );
 
 #endif // PROCESS_H

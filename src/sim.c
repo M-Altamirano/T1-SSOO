@@ -59,18 +59,76 @@ void destroy_simulation_context(SimulationContext* c) {
 }
 
 void step1_move_processes_from_waiting_to_ready_if_io_completed(SimulationContext* c) {
-  (void)c;
-  // Falta: Implementar transición WAITING -> READY cuando se agote IO.
+  Process** process_array = (c->high_priority_mlfq_queue).internal_dynamic_array_of_process_pointers;
+  for (size_t i = 0; i < c->high_priority_mlfq_queue.internal_dynamic_array_size; i++) {
+    if (process_array[i]->current_process_state == PROCESS_STATE_WAITING) {
+      process_array[i]->remaining_time_in_current_input_output_wait--;
+      if (process_array[i]->remaining_time_in_current_input_output_wait == 0) {
+        process_array[i]->current_process_state = PROCESS_STATE_READY;
+      }
+    }
+  }
+  process_array = (c->low_priority_mlfq_queue).internal_dynamic_array_of_process_pointers;
+  for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
+    if (process_array[i]->current_process_state == PROCESS_STATE_WAITING) {
+      process_array[i]->remaining_time_in_current_input_output_wait--;
+      if (process_array[i]->remaining_time_in_current_input_output_wait == 0) {
+        process_array[i]->current_process_state = PROCESS_STATE_READY;
+      }
+    }
+  }
 }
 
 void step2_mark_processes_as_dead_if_deadline_reached_in_queues(SimulationContext* c) {
-  (void)c;
-  // Falta: Marcar como DEAD si venció deadline (para procesos en colas).
+  Process** process_array = (c->high_priority_mlfq_queue).internal_dynamic_array_of_process_pointers;
+  for (size_t i = 0; i < c->high_priority_mlfq_queue.internal_dynamic_array_size; i++) {
+    if (process_array[i]->absolute_execution_deadline == c->current_simulation_tick) {
+      process_array[i]->current_process_state = PROCESS_STATE_DEAD;
+      push_process_into_process_pool(&(c->dead_processes), process_array[i]);
+      remove_process_from_queue(&(c->high_priority_mlfq_queue), i);
+    }
+  }
+  process_array = (c->low_priority_mlfq_queue).internal_dynamic_array_of_process_pointers;
+  for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
+    if (process_array[i]->absolute_execution_deadline == c->current_simulation_tick) {
+      process_array[i]->current_process_state = PROCESS_STATE_DEAD;
+      push_process_into_process_pool(&(c->dead_processes), process_array[i]);
+      remove_process_from_queue(&(c->low_priority_mlfq_queue), i);
+    }
+  }
 }
 
 void step3_update_currently_running_process_with_ordered_rules(SimulationContext* c) {
-  (void)c;
-  // Falta: Implementar orden 3.1 a 3.5.
+  Process* current_running_process = c->cpu_execution_unit.currently_running_process_pointer;
+  // 3.1
+  if (current_running_process->absolute_execution_deadline == c->current_simulation_tick) {
+    current_running_process->current_process_state = PROCESS_STATE_DEAD;
+    push_process_into_process_pool(&(c->dead_processes), current_running_process);
+    return;
+  }
+  // 3.2
+  current_running_process->remaining_time_in_current_cpu_burst--;
+  c->cpu_execution_unit.remaining_quantum_time_in_ticks_for_current_process--;
+  if (current_running_process->remaining_time_in_current_cpu_burst == 0) {
+    current_running_process->number_of_completed_cpu_bursts++;
+    if (current_running_process->number_of_completed_cpu_bursts == current_running_process->total_number_of_cpu_bursts) {
+      current_running_process->current_process_state = PROCESS_STATE_FINISHED;
+      push_process_into_process_pool(&(c->finished_processes), current_running_process);
+    }
+    else current_running_process->current_process_state = PROCESS_STATE_WAITING;
+    return;
+  }
+  // 3.3
+  if (c->cpu_execution_unit.remaining_quantum_time_in_ticks_for_current_process == 0) {
+    current_running_process->current_process_state = PROCESS_STATE_READY;
+    return;
+  }
+  // 3.4
+  unsigned int next_event_tick = c->simulation_input_data.array_of_forced_cpu_events[c->next_forced_event_index_to_process].event_time_tick;
+  if (c->current_simulation_tick == next_event_tick) {
+    current_running_process->current_process_state = PROCESS_STATE_READY;
+    current_running_process->is_priority_forced_to_maximum_due_to_event = true;
+  }
 }
 
 static void ingress_new_arrivals_into_high_queue_when_start_time_matches_tick(
