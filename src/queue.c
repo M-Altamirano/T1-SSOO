@@ -103,24 +103,16 @@ static int compare_process_pointers_by_effective_priority_then_pid(
 #endif
 
 Process* pop_best_ready_process_from_process_queue(
-  ProcessQueue* q,
-  long long current_simulation_tick
+  ProcessQueue* q
 ) {
   if (!q || q->internal_dynamic_array_size == 0) return NULL;
 
-  // Ordena según prioridad efectiva y PID
-  qsort_with_tick(q->internal_dynamic_array_of_process_pointers,
-                  q->internal_dynamic_array_size,
-                  &current_simulation_tick);
 
   // Toma el primero (mayor prioridad):
-  Process* best = q->internal_dynamic_array_of_process_pointers[0];
+  Process* best = q->internal_dynamic_array_of_process_pointers[(q->internal_dynamic_array_size)-1];
 
-  // Compacta
-  for (size_t i = 1; i < q->internal_dynamic_array_size; ++i) {
-    q->internal_dynamic_array_of_process_pointers[i - 1] =
-        q->internal_dynamic_array_of_process_pointers[i];
-  }
+  // Elimina el último puntero
+  q->internal_dynamic_array_of_process_pointers[(q->internal_dynamic_array_size) - 1] = NULL;
   q->internal_dynamic_array_size--;
 
   return best;
@@ -139,5 +131,32 @@ void accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(
     if (p && p->current_process_state == PROCESS_STATE_READY) {
       p->accumulated_time_in_ready_or_waiting_states += 1ull;
     }
+  }
+}
+
+static size_t partition_queue (ProcessQueue* queue, size_t beginning, size_t end) {
+  size_t p = (size_t) end - beginning / 2;
+  Process* pivot = queue->internal_dynamic_array_of_process_pointers[p];
+  queue->internal_dynamic_array_of_process_pointers[p] = queue->internal_dynamic_array_of_process_pointers[end];
+  queue->internal_dynamic_array_of_process_pointers[end] = pivot;
+  size_t current_position = beginning;
+  for (size_t i = beginning; i < end - 1; i++) {
+    if (queue->internal_dynamic_array_of_process_pointers[i]->last_computed_effective_priority_value < pivot->last_computed_effective_priority_value) {
+      Process* placeholder = queue->internal_dynamic_array_of_process_pointers[current_position];
+      queue->internal_dynamic_array_of_process_pointers[current_position] = queue->internal_dynamic_array_of_process_pointers[i];
+      queue->internal_dynamic_array_of_process_pointers[i] = placeholder;
+      current_position++;
+    }
+  }
+  queue->internal_dynamic_array_of_process_pointers[end] = queue->internal_dynamic_array_of_process_pointers[current_position];
+  queue->internal_dynamic_array_of_process_pointers[current_position] = pivot;
+  return current_position;
+}
+
+void reorder_queue_by_priority(ProcessQueue* queue, size_t beginning, size_t end) {
+  if (beginning < end) {
+    size_t pivot = partition_queue(queue, beginning, end);
+    reorder_queue_by_priority(queue, beginning, pivot - 1);
+    reorder_queue_by_priority(queue, pivot + 1, end);
   }
 }

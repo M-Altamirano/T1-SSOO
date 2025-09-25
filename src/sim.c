@@ -40,7 +40,6 @@ bool initialize_simulation_context_from_input(
 
   // CPU libre al inicio:
   c->cpu_execution_unit.currently_running_process_pointer = NULL;
-  c->cpu_execution_unit.remaining_quantum_time_in_ticks_for_current_process = 0u;
 
   return true;
 }
@@ -108,7 +107,7 @@ void step3_update_currently_running_process_with_ordered_rules(SimulationContext
   }
   // 3.2
   current_running_process->remaining_time_in_current_cpu_burst--;
-  c->cpu_execution_unit.remaining_quantum_time_in_ticks_for_current_process--;
+  c->cpu_execution_unit.currently_running_process_pointer->remaining_quantum--;
   if (current_running_process->remaining_time_in_current_cpu_burst == 0) {
     current_running_process->number_of_completed_cpu_bursts++;
     if (current_running_process->number_of_completed_cpu_bursts == current_running_process->total_number_of_cpu_bursts) {
@@ -119,7 +118,7 @@ void step3_update_currently_running_process_with_ordered_rules(SimulationContext
     return;
   }
   // 3.3
-  if (c->cpu_execution_unit.remaining_quantum_time_in_ticks_for_current_process == 0) {
+  if (c->cpu_execution_unit.currently_running_process_pointer->remaining_quantum == 0) {
     current_running_process->current_process_state = PROCESS_STATE_READY;
     return;
   }
@@ -144,25 +143,82 @@ static void ingress_new_arrivals_into_high_queue_when_start_time_matches_tick(
       p->current_process_state = PROCESS_STATE_READY;
       p->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
       push_ready_process_into_process_queue(&c->high_priority_mlfq_queue, p);
+      p->remaining_quantum = c->high_priority_mlfq_queue.associated_queue_quantum_in_ticks;
+      
     }
   }
 }
 
 void step4_ingress_processes_into_queues_according_to_rules(SimulationContext* c) {
-  // 4.1) El que salió de CPU: pendiente
+  // 4.1) El que salió de CPU
+  Process* current_running_process = c->cpu_execution_unit.currently_running_process_pointer;
+  if (current_running_process->current_process_state != PROCESS_STATE_RUNNING) {
+    switch (current_running_process->current_process_state)
+    {
+    case PROCESS_STATE_READY:
+      if (current_running_process->is_priority_forced_to_maximum_due_to_event) {
+        push_ready_process_into_process_queue(&(c->high_priority_mlfq_queue), current_running_process);
+      }
+      else {
+        current_running_process->current_queue_affinity = PROCESS_QUEUE_AFFINITY_LOW;
+        push_ready_process_into_process_queue(&(c->low_priority_mlfq_queue), current_running_process);
+        current_running_process->remaining_quantum = c->low_priority_mlfq_queue.associated_queue_quantum_in_ticks;
+      }
+      break;
+
+    case PROCESS_STATE_WAITING:
+      if (current_running_process->current_queue_affinity == PROCESS_QUEUE_AFFINITY_HIGH) {
+        push_ready_process_into_process_queue(&(c->high_priority_mlfq_queue), current_running_process);
+      }
+      else if (current_running_process->current_queue_affinity == PROCESS_QUEUE_AFFINITY_LOW) {
+        push_ready_process_into_process_queue(&(c->low_priority_mlfq_queue), current_running_process);
+      }
+      break;
+    
+    default:
+      break;
+    }
+  }
   // 4.2) Ingresos por T_INICIO:
   ingress_new_arrivals_into_high_queue_when_start_time_matches_tick(c);
   // 4.3) Subir Low->High por condición de urgencia: pendiente
+  for (int i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
+    Process* low_priority_process = c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
+    if (low_priority_process->absolute_execution_deadline * 2 < c->current_simulation_tick - low_priority_process->last_time_tick_when_left_cpu) {
+      push_ready_process_into_process_queue(&(c->high_priority_mlfq_queue), low_priority_process);
+      remove_process_from_queue(&(c->low_priority_mlfq_queue), (size_t) i);
+    } 
+  }
 }
 
 void step5_recompute_priorities_for_all_ready_processes(SimulationContext* c) {
-  (void)c;
-  // Falta: Recalcular prioridades (aquí, con colas basadas en pop ordenado, no es crítico aún).
+  for (size_t i = 0; i < c->high_priority_mlfq_queue.internal_dynamic_array_size; i++) {
+    compute_effective_priority_value_for_process(c->high_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i], c->current_simulation_tick);
+  }
+  qsort_with_tick(c->high_priority_mlfq_queue.internal_dynamic_array_of_process_pointers,
+                  c->high_priority_mlfq_queue.internal_dynamic_array_size,
+                  &(c->current_simulation_tick));
+  for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
+    compute_effective_priority_value_for_process(c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i], c->current_simulation_tick);
+  }
+  qsort_with_tick(c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers,
+                  c->low_priority_mlfq_queue.internal_dynamic_array_size,
+                  &(c->current_simulation_tick));
 }
 
 void step6_select_next_process_for_cpu_according_to_priority_order(SimulationContext* c) {
   (void)c;
-  // Falta: Selección por evento, High, luego Low. (Pendiente)
+  if (c->cpu_execution_unit.currently_running_process_pointer->current_process_state != PROCESS_STATE_RUNNING) {
+    Process* new_process_in_cpu = NULL;
+    if (c->high_priority_mlfq_queue.internal_dynamic_array_size >= 1) {
+      new_process_in_cpu = pop_best_ready_process_from_process_queue($(c->high_priority_mlfq_queue));
+    }
+    else if (c->low_priority_mlfq_queue.internal_dynamic_array_size >= 1) {
+      new_process_in_cpu = pop_best_ready_process_from_process_queue($(c->low_priority_mlfq_queue));
+    }
+    c->cpu_execution_unit.currently_running_process_pointer = new_process_in_cpu;
+    new_process_in_cpu->current_process_state = PROCESS_STATE_RUNNING;
+  }
 }
 
 bool are_all_processes_in_terminal_state_and_no_work_left(const SimulationContext* c) {

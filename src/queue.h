@@ -39,8 +39,7 @@ void remove_process_from_queue(
 // Devuelve y elimina el proceso de mayor prioridad (según fórmula y PID),
 // o NULL si la cola está vacía.
 Process* pop_best_ready_process_from_process_queue(
-  ProcessQueue* queue_pointer,
-  long long current_simulation_tick
+  ProcessQueue* queue_pointer
 );
 
 // Devuelve true si está vacía.
@@ -51,5 +50,7 @@ bool is_process_queue_empty(const ProcessQueue* queue_pointer);
 void accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(
   ProcessQueue* queue_pointer
 );
+
+void reorder_queue_by_priority(ProcessQueue* queue, size_t beginning, size_t end);
 
 #endif // QUEUE_H

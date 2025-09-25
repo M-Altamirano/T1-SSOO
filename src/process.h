@@ -36,6 +36,7 @@ typedef struct Process {
   long long last_time_tick_when_left_cpu;            // Tiempo_LCPU
   long long first_time_tick_when_entered_cpu;        // Para response time
   long long time_tick_when_finished_or_dead_for_sorting; // Para ordenar salida
+  unsigned int remaining_quantum;
 
   unsigned long long accumulated_time_in_ready_or_waiting_states; // waiting
   unsigned int number_of_preemption_interruptions;
