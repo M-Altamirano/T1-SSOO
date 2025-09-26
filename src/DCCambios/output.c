@@ -5,8 +5,6 @@
 static size_t partition_pool (ProcessPool* pool, size_t beginning, size_t end) {
   if (beginning < end) {
     size_t p = (size_t) floor((end - beginning) / 2) + beginning;
-    printf("pivot %zu\n", p);
-    if (p<0) printf("begin %zu end %zu\n", beginning, end);
     Process* pivot = pool->internal_dynamic_array_of_process_pointers[p];
     pool->internal_dynamic_array_of_process_pointers[p] = pool->internal_dynamic_array_of_process_pointers[end];
     pool->internal_dynamic_array_of_process_pointers[end] = pivot;

@@ -32,7 +32,7 @@ bool push_ready_process_into_process_queue(
 
 // Elimina un proceso de la lista
 void remove_process_from_queue(
-  ProcessQueue* queue_pointer,
+  ProcessQueue* q,
   size_t index
 );
 

@@ -49,20 +49,41 @@ bool push_ready_process_into_process_queue(
     q->internal_dynamic_array_of_process_pointers = new_arr;
     q->internal_dynamic_array_capacity = new_cap;
   }
-  q->internal_dynamic_array_of_process_pointers[q->internal_dynamic_array_size++] = p;
+  q->internal_dynamic_array_of_process_pointers[q->internal_dynamic_array_size] = p;
+  q->internal_dynamic_array_size += (size_t) 1;
+  printf("%s, %zu\n", p->process_name, q->internal_dynamic_array_size);
   return true;
 }
 
 // Elimina un proceso de la lista
-void remove_process_from_queue(
-  ProcessQueue* queue_pointer,
-  size_t index
-) {
-  for (size_t i = index; i < queue_pointer->internal_dynamic_array_size; i++) {
-    queue_pointer->internal_dynamic_array_of_process_pointers[i] =
-        queue_pointer->internal_dynamic_array_of_process_pointers[i+1];
+// void remove_process_from_queue(
+//   ProcessQueue* queue_pointer,
+//   size_t index
+// ) {
+//   for (size_t i = index; i + 1 < queue_pointer->internal_dynamic_array_size; i++) {
+//     if (queue_pointer->internal_dynamic_array_size > i) {
+//       queue_pointer->internal_dynamic_array_of_process_pointers[i] =
+//           queue_pointer->internal_dynamic_array_of_process_pointers[i+1];
+//     }
+//     else queue_pointer->internal_dynamic_array_of_process_pointers[i] = NULL;
+//   }
+//   queue_pointer->internal_dynamic_array_size--;
+// }
+void remove_process_from_queue(ProcessQueue* q, size_t index) {
+  if (!q) return;
+  if (index >= q->internal_dynamic_array_size) return; // bounds check
+
+  size_t n = q->internal_dynamic_array_size;
+
+  // Shift everything left one slot (only if index is not the last slot)
+  for (size_t i = index; i + 1 < n; ++i) {
+    q->internal_dynamic_array_of_process_pointers[i] =
+      q->internal_dynamic_array_of_process_pointers[i + 1];
   }
-  queue_pointer->internal_dynamic_array_size--;
+
+  // Clear the now-unused last slot and decrement size
+  q->internal_dynamic_array_of_process_pointers[n - 1] = NULL;
+  q->internal_dynamic_array_size = n - 1;
 }
 
 static int compare_process_pointers_by_effective_priority_then_pid(
@@ -75,15 +96,15 @@ static int compare_process_pointers_by_effective_priority_then_pid(
   double prio_a = pa->priority;
   double prio_b = pb->priority;
 
-  if (pa->current_process_state == PROCESS_STATE_WAITING && pa->current_process_state == PROCESS_STATE_READY) return 1;
-  if (pb->current_process_state == PROCESS_STATE_WAITING && pa->current_process_state == PROCESS_STATE_READY) return -1;
+  if (pa->current_process_state == PROCESS_STATE_WAITING && pb->current_process_state == PROCESS_STATE_READY) return -1;
+  if (pb->current_process_state == PROCESS_STATE_WAITING && pa->current_process_state == PROCESS_STATE_READY) return 1;
 
-  if (prio_a > prio_b) return -1; // mayor prioridad primero
-  if (prio_a < prio_b) return 1;
+  if (prio_a > prio_b) return 1; // menor prioridad primero
+  if (prio_a < prio_b) return -1;
 
   // Desempate por menor PID
-  if (pa->process_id < pb->process_id) return -1;
-  if (pa->process_id > pb->process_id) return 1;
+  if (pa->process_id < pb->process_id) return 1;
+  if (pa->process_id > pb->process_id) return -1;
   return 0;
 }
 
@@ -126,18 +147,18 @@ void accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(
   ProcessQueue* q
 ) {
   if (!q) return;
+  // printf("\n################\n%zu\n", q->internal_dynamic_array_size);
+  // for (size_t i = 0; i < q->internal_dynamic_array_capacity; i++) printf("%s, ", q->internal_dynamic_array_of_process_pointers[i] ? q->internal_dynamic_array_of_process_pointers[i]->process_name : "NULL");
   for (size_t i = 0; i < q->internal_dynamic_array_size; i++) {
-    printf("wtf");
     Process* p = q->internal_dynamic_array_of_process_pointers[i];
     if (p) {
-      printf("updating");
       p->accumulated_time_in_ready_or_waiting_states += 1ull;
     }
   }
 }
 
 static size_t partition_queue (ProcessQueue* queue, size_t beginning, size_t end) {
-  size_t p = (size_t) end - beginning / 2;
+  size_t p = (size_t) beginning + (end - beginning) / 2;
   Process* pivot = queue->internal_dynamic_array_of_process_pointers[p];
   queue->internal_dynamic_array_of_process_pointers[p] = queue->internal_dynamic_array_of_process_pointers[end];
   queue->internal_dynamic_array_of_process_pointers[end] = pivot;

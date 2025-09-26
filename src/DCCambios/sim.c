@@ -64,7 +64,7 @@ void step1_move_processes_from_waiting_to_ready_if_io_completed(SimulationContex
   Process** process_array = (c->high_priority_mlfq_queue).internal_dynamic_array_of_process_pointers;
   for (size_t i = 0; i < c->high_priority_mlfq_queue.internal_dynamic_array_size; i++) {
     if (process_array[i]->current_process_state == PROCESS_STATE_WAITING) {
-      process_array[i]->remaining_time_in_current_input_output_wait--;
+      process_array[i]->remaining_time_in_current_input_output_wait -= 1ull;
       if (process_array[i]->remaining_time_in_current_input_output_wait == 0) {
         process_array[i]->current_process_state = PROCESS_STATE_READY;
       }
@@ -73,7 +73,7 @@ void step1_move_processes_from_waiting_to_ready_if_io_completed(SimulationContex
   process_array = (c->low_priority_mlfq_queue).internal_dynamic_array_of_process_pointers;
   for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
     if (process_array[i]->current_process_state == PROCESS_STATE_WAITING) {
-      process_array[i]->remaining_time_in_current_input_output_wait--;
+      process_array[i]->remaining_time_in_current_input_output_wait -= 1ull;
       if (process_array[i]->remaining_time_in_current_input_output_wait == 0) {
         process_array[i]->current_process_state = PROCESS_STATE_READY;
       }
@@ -156,7 +156,7 @@ static void ingress_new_arrivals_into_high_queue_when_start_time_matches_tick(
       p->current_process_state = PROCESS_STATE_READY;
       p->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
       p->start_time = c->current_simulation_tick;
-      push_ready_process_into_process_queue(&c->high_priority_mlfq_queue, p);
+      if (!push_ready_process_into_process_queue(&(c->high_priority_mlfq_queue), p)) printf("fuck\n");
       p->remaining_quantum = c->high_priority_mlfq_queue.associated_queue_quantum_in_ticks;
       
     }
@@ -172,11 +172,12 @@ void step4_ingress_processes_into_queues_according_to_rules(SimulationContext* c
       {
       case PROCESS_STATE_READY:
         if (current_running_process->is_priority_forced_to_maximum_due_to_event) {
-          push_ready_process_into_process_queue(&(c->high_priority_mlfq_queue), current_running_process);
+          current_running_process->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
+          if (!push_ready_process_into_process_queue(&(c->high_priority_mlfq_queue), current_running_process)) printf("fuck ready");
         }
         else {
           current_running_process->current_queue_affinity = PROCESS_QUEUE_AFFINITY_LOW;
-          push_ready_process_into_process_queue(&(c->low_priority_mlfq_queue), current_running_process);
+          if (!push_ready_process_into_process_queue(&(c->low_priority_mlfq_queue), current_running_process)) printf("fuck ready");
           current_running_process->remaining_quantum = c->low_priority_mlfq_queue.associated_queue_quantum_in_ticks;
         }
         break;
@@ -198,11 +199,12 @@ void step4_ingress_processes_into_queues_according_to_rules(SimulationContext* c
   // 4.2) Ingresos por T_INICIO:
   ingress_new_arrivals_into_high_queue_when_start_time_matches_tick(c);
   // 4.3) Subir Low->High por condición de urgencia: pendiente
-  for (int i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
+  for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
     Process* low_priority_process = c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
     if (low_priority_process->absolute_execution_deadline * 2 < c->current_simulation_tick - low_priority_process->last_time_tick_when_left_cpu) {
+      low_priority_process->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
       push_ready_process_into_process_queue(&(c->high_priority_mlfq_queue), low_priority_process);
-      remove_process_from_queue(&(c->low_priority_mlfq_queue), (size_t) i);
+      remove_process_from_queue(&(c->low_priority_mlfq_queue), i);
     } 
   }
 }
@@ -214,12 +216,22 @@ void step5_recompute_priorities_for_all_ready_processes(SimulationContext* c) {
   }
   qsort_with_tick(c->high_priority_mlfq_queue.internal_dynamic_array_of_process_pointers,
                   c->high_priority_mlfq_queue.internal_dynamic_array_size);
+  if (c->high_priority_mlfq_queue.internal_dynamic_array_size > 0) printf("high\n");
+  for (size_t i = 0; i < c->high_priority_mlfq_queue.internal_dynamic_array_size; i++) {
+    Process* p = c->high_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
+    printf("%s, %s, %f\n", p->process_name, p->current_process_state == PROCESS_STATE_READY? "READY": "WAIT", p->priority);
+  }
   for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
     Process* p = c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
     p->priority = compute_effective_priority_value_for_process(p, c->current_simulation_tick);
     }
   qsort_with_tick(c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers,
                   c->low_priority_mlfq_queue.internal_dynamic_array_size);
+  if (c->low_priority_mlfq_queue.internal_dynamic_array_size > 0) printf("low\n");
+  for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
+    Process* p = c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
+    printf("%s, %s, %f\n",p->process_name, p->current_process_state == PROCESS_STATE_READY? "READY": "WAIT", p->priority);
+  }
 }
 
 void step6_select_next_process_for_cpu_according_to_priority_order(SimulationContext* c) {
@@ -238,12 +250,12 @@ void step6_select_next_process_for_cpu_according_to_priority_order(SimulationCon
     if (c->high_priority_mlfq_queue.internal_dynamic_array_size >= 1) {
       Process* best_process = pop_best_ready_process_from_process_queue(&(c->high_priority_mlfq_queue));
       if (best_process->current_process_state == PROCESS_STATE_READY) new_process_in_cpu = best_process;
-      else push_ready_process_into_process_queue(&c->high_priority_mlfq_queue, best_process);
+      else push_ready_process_into_process_queue(&(c->high_priority_mlfq_queue), best_process);
     }
     if (c->low_priority_mlfq_queue.internal_dynamic_array_size >= 1 && new_process_in_cpu == NULL) {
       Process* best_process = pop_best_ready_process_from_process_queue(&(c->low_priority_mlfq_queue));
       if (best_process->current_process_state == PROCESS_STATE_READY) new_process_in_cpu = best_process;
-      else push_ready_process_into_process_queue(&c->low_priority_mlfq_queue, best_process);
+      else push_ready_process_into_process_queue(&(c->low_priority_mlfq_queue), best_process);
     }
     c->cpu_execution_unit.currently_running_process_pointer = new_process_in_cpu;
     if (new_process_in_cpu != NULL) {
@@ -293,8 +305,8 @@ void run_simulation_skeleton_main_loop(SimulationContext* c) {
          c->current_simulation_tick < maximum_safety_number_of_ticks_to_prevent_infinite_loops) {
 
     // (Métrica) acumular waiting por tick para procesos READY en colas:
-    accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(&c->high_priority_mlfq_queue);
-    accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(&c->low_priority_mlfq_queue);
+    accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(&(c->high_priority_mlfq_queue));
+    accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(&(c->low_priority_mlfq_queue));
 
     // Orden del scheduler (stubs por ahora):
     step1_move_processes_from_waiting_to_ready_if_io_completed(c);
