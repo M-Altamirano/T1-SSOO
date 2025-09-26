@@ -45,7 +45,7 @@ LIB=$(MTH)
 ###############################################################################
 
 # Directorios con elementos de uso común
-COMMON=input_manager
+# COMMON=input_manager
 
 # Directorios que serán compilados a un programa
 PROGRAMS=DCCambios
