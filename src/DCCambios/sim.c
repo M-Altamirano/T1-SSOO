@@ -278,24 +278,30 @@ bool are_all_processes_in_terminal_state_and_no_work_left(const SimulationContex
   if (!is_process_queue_empty(&c->high_priority_mlfq_queue)) return false;
   if (!is_process_queue_empty(&c->low_priority_mlfq_queue)) return false;
 
-  for (unsigned int i = 0; i < c->simulation_input_data.number_of_processes_from_input_file; i++) {
-    Process* p = c->simulation_input_data.array_of_process_input_records[i].instantiated_process_pointer;
+  // Si existe un proceso que ya debería estar "activo" (T_INICIO <= tick)
+  // y que NO está FINISHED/DEAD, aún hay trabajo.
+  for (unsigned int i = 0; i < c->simulation_input_data.number_of_processes_from_input_file; ++i) {
+    const ProcessInputRecord* rec = &c->simulation_input_data.array_of_process_input_records[i];
+    const Process* p = rec->instantiated_process_pointer;
     if (!p) continue;
-    if (p->current_process_state != PROCESS_STATE_FINISHED &&
+
+    if ((long long)rec->input_start_time_tick <= c->current_simulation_tick &&
+        p->current_process_state != PROCESS_STATE_FINISHED &&
         p->current_process_state != PROCESS_STATE_DEAD) {
-      // Si no está terminado ni muerto, pero tampoco está en cola/CPU,
-      // ahora puede deberse a que aún no llega su T_INICIO.
-      // Para evitar loop infinito, permitimos terminar cuando el tick ya superó todos los T_INICIO.
-      unsigned int t_inicio = c->simulation_input_data.array_of_process_input_records[i].input_start_time_tick;
-      if ((long long)t_inicio > c->current_simulation_tick) {
-        return false;
-      }
+      return false;
     }
   }
+
+  // Si aún no llega el T_INICIO de alguien, no podemos terminar (para no cortar antes).
+  for (unsigned int i = 0; i < c->simulation_input_data.number_of_processes_from_input_file; ++i) {
+    const ProcessInputRecord* rec = &c->simulation_input_data.array_of_process_input_records[i];
+    if ((long long)rec->input_start_time_tick > c->current_simulation_tick) {
+      return false;
+    }
+  }
+
   return true;
 }
-
-
 
 
 void run_simulation_skeleton_main_loop(SimulationContext* c) {
