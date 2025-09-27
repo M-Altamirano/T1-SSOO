@@ -45,6 +45,9 @@ void initialize_process_simulation_fields(Process* p) {
   p->remaining_time_in_current_input_output_wait = 0u;
 
   p->last_time_tick_when_left_cpu = -1;
+  p->first_time_tick_when_entered_cpu = -1;
+  p->time_tick_when_finished_or_dead_for_sorting = -1;
+
   p->start_time = -1;
   p->response_time = -1;
 

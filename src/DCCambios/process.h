@@ -34,9 +34,11 @@ typedef struct Process {
   unsigned int number_of_completed_cpu_bursts;
   unsigned int remaining_time_in_current_cpu_burst;
   unsigned int remaining_time_in_current_input_output_wait;
-  unsigned long long last_time_tick_when_left_cpu;            // Tiempo_LCPU
-  unsigned long long start_time;        // Para response time
-  unsigned long long response_time;
+  long long last_time_tick_when_left_cpu;            // Tiempo_LCPU
+  long long first_time_tick_when_entered_cpu;
+  long long time_tick_when_finished_or_dead_for_sorting;
+  long long start_time;        // Para response time
+  long long response_time;
   unsigned long long turnaround_time;
   unsigned int remaining_quantum;
 
