@@ -81,70 +81,50 @@ static void update_or_insert_row(ProcessPrintableRow* rows,
 
 void write_simulation_output(
   const char* output_file_path,
-  SimulationContext* simulation_data
+  SimulationContext* sim
 ) {
-  FILE* output_file = fopen(output_file_path, "w");
-  if (!output_file) return;
+  FILE* f = fopen(output_file_path, "w");
+  if (!f) return;
 
-  ProcessPool* finished_pool = &(simulation_data->finished_processes);
-  ProcessPool* dead_pool     = &(simulation_data->dead_processes);
+  const SimulationInputData* in = &sim->simulation_input_data;
 
-  // Construimos candidatos (pueden venir duplicados desde pools)
-  size_t total_candidates = finished_pool->internal_dynamic_array_size
-                          + dead_pool->internal_dynamic_array_size;
+  for (unsigned int i = 0; i < in->number_of_processes_from_input_file; ++i) {
+    const ProcessInputRecord* rec = &in->array_of_process_input_records[i];
+    Process* p = rec->instantiated_process_pointer;
+    if (!p) continue; // por seguridad
 
-  ProcessPrintableRow* rows = (ProcessPrintableRow*)calloc(total_candidates, sizeof(ProcessPrintableRow));
-  if (!rows) { fclose(output_file); return; }
+    const char* name = p->process_name;
+    unsigned int pid  = p->process_id;
+    unsigned int t0   = rec->input_start_time_tick;
 
-  size_t m = 0;
-  for (size_t i = 0; i < finished_pool->internal_dynamic_array_size; ++i) {
-    update_or_insert_row(rows, &m, finished_pool->internal_dynamic_array_of_process_pointers[i], simulation_data);
-  }
-  for (size_t i = 0; i < dead_pool->internal_dynamic_array_size; ++i) {
-    update_or_insert_row(rows, &m, dead_pool->internal_dynamic_array_of_process_pointers[i], simulation_data);
-  }
-
-  // Orden por tiempo de término, desempata por PID
-  qsort(rows, m, sizeof(ProcessPrintableRow), compare_rows_by_finish_time_then_pid);
-
-  // Escribir CSV (una sola fila por PID)
-  for (size_t i = 0; i < m; ++i) {
-    Process* p = rows[i].process_pointer;
-    unsigned int t_inicio = rows[i].start_time_tick_for_this_process;
-
-    // Métricas: usa primero las del proceso; si están en sentinela, calcula/clampa a 0.
-    unsigned long long response_out = 0ULL;
-    if (p->response_time != LL_SENTINEL) {
-      response_out = (unsigned long long)p->response_time;
-    } else if (p->first_time_tick_when_entered_cpu >= 0) {
-      long long calc = p->first_time_tick_when_entered_cpu - (long long)t_inicio;
-      response_out = (calc < 0) ? 0ULL : (unsigned long long)calc;
+    // response = (first_cpu - T_INICIO + 1) clamped ≥ 0
+    unsigned long long response = 0ULL;
+    if (p->first_time_tick_when_entered_cpu >= 0) {
+      long long r = p->first_time_tick_when_entered_cpu - (long long)t0 + 1;
+      if (r < 0) r = 0;
+      response = (unsigned long long) r;
     }
 
-    // turnaround_out: finish - T_INICIO
-    unsigned long long turnaround_out = 0ULL;
-    if (p->turnaround_time != ULL_SENTINEL) {
-      turnaround_out = p->turnaround_time;
-    } else {
-      long long calc = rows[i].finish_tick_for_sort - (long long)t_inicio;
-      turnaround_out = (calc < 0) ? 0ULL : (unsigned long long)calc;
+    // turnaround = (finish_tick - T_INICIO) clamped ≥ 0
+    unsigned long long tat = 0ULL;
+    if (p->time_tick_when_finished_or_dead_for_sorting >= 0) {
+      long long tt = p->time_tick_when_finished_or_dead_for_sorting - (long long)t0;
+      if (tt < 0) tt = 0;
+      tat = (unsigned long long) tt;
     }
 
-    const char* state =
-      (p->current_process_state == PROCESS_STATE_DEAD) ? "DEAD" : "FINISHED";
+    const char* state = (p->current_process_state == PROCESS_STATE_DEAD) ? "DEAD" : "FINISHED";
 
-    fprintf(output_file,
-      "%s,%u,%s,%u,%llu,%llu,%llu\n",
-      p->process_name,
-      p->process_id,
+    fprintf(f, "%s,%u,%s,%u,%llu,%llu,%llu\n",
+      name,
+      pid,
       state,
       p->number_of_preemption_interruptions,
-      (unsigned long long)turnaround_out,
-      (unsigned long long)response_out,
+      tat,
+      response,
       (unsigned long long)p->accumulated_time_in_ready_or_waiting_states
     );
   }
 
-  free(rows);
-  fclose(output_file);
+  fclose(f);
 }

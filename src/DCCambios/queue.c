@@ -51,7 +51,7 @@ bool push_ready_process_into_process_queue(
   }
   q->internal_dynamic_array_of_process_pointers[q->internal_dynamic_array_size] = p;
   q->internal_dynamic_array_size += (size_t) 1;
-  printf("%s, %zu\n", p->process_name, q->internal_dynamic_array_size);
+  // printf("%s, %zu\n", p->process_name, q->internal_dynamic_array_size);
   return true;
 }
 
@@ -123,35 +123,36 @@ static int compare_process_pointers_by_effective_priority_then_pid(
   }
 #endif
 
-Process* pop_best_ready_process_from_process_queue(
-  ProcessQueue* q
-) {
+Process* pop_best_ready_process_from_process_queue(ProcessQueue* q) {
   if (!q || q->internal_dynamic_array_size == 0) return NULL;
 
-
-  // Toma el primero (mayor prioridad):
-  Process* best = q->internal_dynamic_array_of_process_pointers[(q->internal_dynamic_array_size)-1];
-
-  // Elimina el último puntero
-  q->internal_dynamic_array_of_process_pointers[(q->internal_dynamic_array_size) - 1] = NULL;
-  q->internal_dynamic_array_size--;
-
-  return best;
+  // recorremos desde el final (mayor prioridad) hasta encontrar READY
+  for (size_t idx = q->internal_dynamic_array_size; idx > 0; --idx) {
+    size_t i = idx - 1;
+    Process* cand = q->internal_dynamic_array_of_process_pointers[i];
+    if (cand && cand->current_process_state == PROCESS_STATE_READY) {
+      // remove and return
+      for (size_t j = i; j + 1 < q->internal_dynamic_array_size; ++j) {
+        q->internal_dynamic_array_of_process_pointers[j] =
+          q->internal_dynamic_array_of_process_pointers[j + 1];
+      }
+      q->internal_dynamic_array_of_process_pointers[q->internal_dynamic_array_size - 1] = NULL;
+      q->internal_dynamic_array_size -= 1;
+      return cand;
+    }
+  }
+  return NULL; // no había READY
 }
 
 bool is_process_queue_empty(const ProcessQueue* q) {
   return !q || q->internal_dynamic_array_size == 0;
 }
 
-void accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(
-  ProcessQueue* q
-) {
+void accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(ProcessQueue* q) {
   if (!q) return;
-  // printf("\n################\n%zu\n", q->internal_dynamic_array_size);
-  // for (size_t i = 0; i < q->internal_dynamic_array_capacity; i++) printf("%s, ", q->internal_dynamic_array_of_process_pointers[i] ? q->internal_dynamic_array_of_process_pointers[i]->process_name : "NULL");
   for (size_t i = 0; i < q->internal_dynamic_array_size; i++) {
     Process* p = q->internal_dynamic_array_of_process_pointers[i];
-    if (p) {
+    if (p && p->current_process_state == PROCESS_STATE_READY) {
       p->accumulated_time_in_ready_or_waiting_states += 1ull;
     }
   }

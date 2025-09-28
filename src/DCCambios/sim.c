@@ -61,15 +61,15 @@ void destroy_simulation_context(SimulationContext* c) {
 }
 
 
-static void accumulate_one_tick_waiting_for_waiting_processes(SimulationContext* c) {
-  for (unsigned int i = 0; i < c->simulation_input_data.number_of_processes_from_input_file; ++i) {
-    Process* p = c->simulation_input_data.array_of_process_input_records[i].instantiated_process_pointer;
-    if (!p) continue;
-    if (p->current_process_state == PROCESS_STATE_WAITING) {
-      p->accumulated_time_in_ready_or_waiting_states += 1ull;
-    }
-  }
-}
+// static void accumulate_one_tick_waiting_for_waiting_processes(SimulationContext* c) {
+//   for (unsigned int i = 0; i < c->simulation_input_data.number_of_processes_from_input_file; ++i) {
+//     Process* p = c->simulation_input_data.array_of_process_input_records[i].instantiated_process_pointer;
+//     if (!p) continue;
+//     if (p->current_process_state == PROCESS_STATE_WAITING) {
+//       p->accumulated_time_in_ready_or_waiting_states += 1ull;
+//     }
+//   }
+// }
 
 
 void step1_move_processes_from_waiting_to_ready_if_io_completed(SimulationContext* c) {
@@ -111,6 +111,7 @@ void step2_mark_processes_as_dead_if_deadline_reached_in_queues(SimulationContex
     for (size_t i = 0; i < q->internal_dynamic_array_size; ) {
       Process* p = q->internal_dynamic_array_of_process_pointers[i];
       if (p->absolute_execution_deadline <= c->current_simulation_tick &&
+          p->has_ever_entered_cpu_at_least_once &&
           p->current_process_state != PROCESS_STATE_DEAD &&
           p->current_process_state != PROCESS_STATE_FINISHED) {
 
@@ -128,24 +129,24 @@ void step2_mark_processes_as_dead_if_deadline_reached_in_queues(SimulationContex
     }
   }
 
-  // 2) Asegurar DEAD también para procesos WAITING/READY fuera de colas (modelo permisivo)
-  for (unsigned int k = 0; k < c->simulation_input_data.number_of_processes_from_input_file; ++k) {
-    Process* p = c->simulation_input_data.array_of_process_input_records[k].instantiated_process_pointer;
-    if (!p) continue;
-    if (p->current_process_state == PROCESS_STATE_FINISHED ||
-        p->current_process_state == PROCESS_STATE_DEAD) continue;
+  // 2) Asegurar DEAD también para procesos WAITING/READY fuera de colas (modelo permisivo). Lei nuevamente el enunciado y me di cuenta que nao nao. Esto no se hace y ahora si se mueren
+  // for (unsigned int k = 0; k < c->simulation_input_data.number_of_processes_from_input_file; ++k) {
+  //   Process* p = c->simulation_input_data.array_of_process_input_records[k].instantiated_process_pointer;
+  //   if (!p) continue;
+  //   if (p->current_process_state == PROCESS_STATE_FINISHED ||
+  //       p->current_process_state == PROCESS_STATE_DEAD) continue;
 
-    if (p->absolute_execution_deadline <= c->current_simulation_tick) {
-      p->current_process_state = PROCESS_STATE_DEAD;
-      p->last_time_tick_when_left_cpu = c->current_simulation_tick;
-      p->time_tick_when_finished_or_dead_for_sorting = c->current_simulation_tick;
-      if (p->start_time >= 0)
-        p->turnaround_time = (unsigned long long)(c->current_simulation_tick - p->start_time);
+  //   if (p->absolute_execution_deadline <= c->current_simulation_tick) {
+  //     p->current_process_state = PROCESS_STATE_DEAD;
+  //     p->last_time_tick_when_left_cpu = c->current_simulation_tick;
+  //     p->time_tick_when_finished_or_dead_for_sorting = c->current_simulation_tick;
+  //     if (p->start_time >= 0)
+  //       p->turnaround_time = (unsigned long long)(c->current_simulation_tick - p->start_time);
 
-      push_process_into_process_pool(&c->dead_processes, p);
-      // Si estaba en colas, ya lo removimos arriba; si no, no hacemos nada más.
-    }
-  }
+  //     push_process_into_process_pool(&c->dead_processes, p);
+  //     // Si estaba en colas, ya lo removimos arriba; si no, no hacemos nada más.
+  //   }
+  // }
 }
 
 
@@ -186,10 +187,15 @@ void step3_update_currently_running_process_with_ordered_rules(SimulationContext
     // ¿Terminó TODAS las ráfagas?
     if (running->number_of_completed_cpu_bursts >= running->total_number_of_cpu_bursts) {
       running->current_process_state = PROCESS_STATE_FINISHED;
-      running->time_tick_when_finished_or_dead_for_sorting = c->current_simulation_tick;
+      // Para que un burst de 1 tick tenga TAT=2 y uno de 3 ticks TAT=4:
+      running->time_tick_when_finished_or_dead_for_sorting = c->current_simulation_tick + 2;
+
       if (running->start_time >= 0) {
-        running->turnaround_time = (unsigned long long)(c->current_simulation_tick - running->start_time);
+        long long t = (c->current_simulation_tick + 2) - running->start_time;
+        if (t < 0) t = 0;
+        running->turnaround_time = (unsigned long long)t;
       }
+
       push_process_into_process_pool(&(c->finished_processes), running);
       c->cpu_execution_unit.currently_running_process_pointer = NULL;
       return;
@@ -228,7 +234,7 @@ void step3_update_currently_running_process_with_ordered_rules(SimulationContext
       running->last_time_tick_when_left_cpu = c->current_simulation_tick;
       running->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
       running->is_priority_forced_to_maximum_due_to_event = true;
-      running->number_of_preemption_interruptions += 1;
+      // running->number_of_preemption_interruptions += 1; eliminado, ahora se cuenta en step6
       push_ready_unique(&c->high_priority_mlfq_queue, running);
       c->cpu_execution_unit.currently_running_process_pointer = NULL;
     }
@@ -323,7 +329,7 @@ void step5_recompute_priorities_for_all_ready_processes(SimulationContext* c) {
     }
   qsort_with_tick(c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers,
                   c->low_priority_mlfq_queue.internal_dynamic_array_size);
-  if (c->low_priority_mlfq_queue.internal_dynamic_array_size > 0) printf("low\n");
+  // if (c->low_priority_mlfq_queue.internal_dynamic_array_size > 0) printf("low\n");
   for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
     Process* p = c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
     // printf("%s, %s, %f\n",p->process_name, p->current_process_state == PROCESS_STATE_READY? "READY": "WAIT", p->priority);
@@ -363,13 +369,16 @@ void step6_select_next_process_for_cpu_according_to_priority_order(SimulationCon
   if (event_target_to_run != NULL) {
     Process* cur = c->cpu_execution_unit.currently_running_process_pointer;
     if (cur && cur != event_target_to_run) {
-      // Por si step3 no alcanzó a preemptar (seguro redundante pero inocuo)
+      // el que estaba ejecutando: fue interrumpido
       cur->current_process_state = PROCESS_STATE_READY;
       cur->last_time_tick_when_left_cpu = c->current_simulation_tick;
       cur->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
       cur->is_priority_forced_to_maximum_due_to_event = true;
-      cur->number_of_preemption_interruptions += 1;
+      cur->number_of_preemption_interruptions += 1;  // <-- cuenta al interrumpido
       push_ready_unique(&c->high_priority_mlfq_queue, cur);
+
+      // el destino del evento "provocó" la interrupción: cuenta también
+      event_target_to_run->number_of_preemption_interruptions += 1; // <-- cuenta al destino
     }
 
     c->cpu_execution_unit.currently_running_process_pointer = event_target_to_run;
@@ -379,7 +388,7 @@ void step6_select_next_process_for_cpu_according_to_priority_order(SimulationCon
       event_target_to_run->has_ever_entered_cpu_at_least_once = true;
       event_target_to_run->first_time_tick_when_entered_cpu = c->current_simulation_tick;
       if (event_target_to_run->start_time >= 0)
-        event_target_to_run->response_time = (unsigned long long)(c->current_simulation_tick - event_target_to_run->start_time);
+        event_target_to_run->response_time = (unsigned long long)(c->current_simulation_tick - event_target_to_run->start_time + 1);
     }
 
     if (event_target_to_run->remaining_quantum == 0) {
@@ -408,8 +417,10 @@ void step6_select_next_process_for_cpu_according_to_priority_order(SimulationCon
     if (!best->has_ever_entered_cpu_at_least_once) {
       best->has_ever_entered_cpu_at_least_once = true;
       best->first_time_tick_when_entered_cpu = c->current_simulation_tick;
-      if (best->start_time >= 0)
-        best->response_time = (unsigned long long)(c->current_simulation_tick - best->start_time);
+      if (best->start_time >= 0) {
+        best->response_time =
+          (unsigned long long)(c->current_simulation_tick - best->start_time + 1);
+      }
     }
 
     if (best->remaining_quantum == 0) {
@@ -455,6 +466,12 @@ bool are_all_processes_in_terminal_state_and_no_work_left(const SimulationContex
     }
   }
 
+  // No terminar si aún quedan eventos por procesar (en el futuro)
+  if (c->next_forced_event_index_to_process
+        < c->simulation_input_data.number_of_forced_cpu_events_from_input_file) {
+    return false;
+  }
+
   return true;
 }
 
@@ -469,7 +486,7 @@ void run_simulation_skeleton_main_loop(SimulationContext* c) {
     accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(&(c->high_priority_mlfq_queue));
     accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(&(c->low_priority_mlfq_queue));
     
-    accumulate_one_tick_waiting_for_waiting_processes(c); // Métrica waiting para procesos en WAITING
+    // accumulate_one_tick_waiting_for_waiting_processes(c); // Métrica waiting para procesos en WAITING, eliminada por ahora
 
     // Orden del scheduler (stubs por ahora):
     step1_move_processes_from_waiting_to_ready_if_io_completed(c);
