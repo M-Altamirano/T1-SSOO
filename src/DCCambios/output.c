@@ -114,15 +114,16 @@ void write_simulation_output(
 
     // Métricas: usa primero las del proceso; si están en sentinela, calcula/clampa a 0.
     unsigned long long response_out = 0ULL;
-    if (p->response_time != ULLONG_MAX) {
-      response_out = p->response_time;
+    if (p->response_time != LL_SENTINEL) {
+      response_out = (unsigned long long)p->response_time;
     } else if (p->first_time_tick_when_entered_cpu >= 0) {
       long long calc = p->first_time_tick_when_entered_cpu - (long long)t_inicio;
       response_out = (calc < 0) ? 0ULL : (unsigned long long)calc;
     }
 
+    // turnaround_out: finish - T_INICIO
     unsigned long long turnaround_out = 0ULL;
-    if (p->turnaround_time != ULLONG_MAX) {
+    if (p->turnaround_time != ULL_SENTINEL) {
       turnaround_out = p->turnaround_time;
     } else {
       long long calc = rows[i].finish_tick_for_sort - (long long)t_inicio;

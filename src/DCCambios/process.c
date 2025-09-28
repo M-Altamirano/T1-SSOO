@@ -44,12 +44,14 @@ void initialize_process_simulation_fields(Process* p) {
   p->remaining_time_in_current_cpu_burst = p->cpu_burst_duration_per_burst;
   p->remaining_time_in_current_input_output_wait = 0u;
 
-  p->last_time_tick_when_left_cpu = -1;
-  p->first_time_tick_when_entered_cpu = -1;
-  p->time_tick_when_finished_or_dead_for_sorting = -1;
+  p->last_time_tick_when_left_cpu = LL_SENTINEL;         // LCPU
+  p->first_time_tick_when_entered_cpu = LL_SENTINEL;
+  p->time_tick_when_finished_or_dead_for_sorting = LL_SENTINEL;
 
-  p->start_time = -1;
-  p->response_time = -1;
+  p->start_time = LL_SENTINEL;                           // T_INICIO efectivo (cuando entra por 1a vez)
+  p->response_time = LL_SENTINEL;
+  p->turnaround_time = ULL_SENTINEL;
+  p->remaining_quantum = 0u;
 
   p->accumulated_time_in_ready_or_waiting_states = 0ull;
   p->number_of_preemption_interruptions = 0u;
@@ -60,8 +62,9 @@ void initialize_process_simulation_fields(Process* p) {
   p->current_queue_affinity = PROCESS_QUEUE_AFFINITY_NONE;
 
   p->last_computed_effective_priority_value = 0.0;
-  p->last_tick_when_priority_was_computed = -1;
+  p->last_tick_when_priority_was_computed = LL_SENTINEL;
 }
+
 
 void destroy_process(Process* p) {
   if (!p) return;

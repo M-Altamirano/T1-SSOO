@@ -60,6 +60,18 @@ void destroy_simulation_context(SimulationContext* c) {
   memset(c, 0, sizeof(*c));
 }
 
+
+static void accumulate_one_tick_waiting_for_waiting_processes(SimulationContext* c) {
+  for (unsigned int i = 0; i < c->simulation_input_data.number_of_processes_from_input_file; ++i) {
+    Process* p = c->simulation_input_data.array_of_process_input_records[i].instantiated_process_pointer;
+    if (!p) continue;
+    if (p->current_process_state == PROCESS_STATE_WAITING) {
+      p->accumulated_time_in_ready_or_waiting_states += 1ull;
+    }
+  }
+}
+
+
 void step1_move_processes_from_waiting_to_ready_if_io_completed(SimulationContext* c) {
   for (unsigned int i = 0; i < c->simulation_input_data.number_of_processes_from_input_file; ++i) {
     Process* p = c->simulation_input_data.array_of_process_input_records[i].instantiated_process_pointer;
@@ -69,13 +81,22 @@ void step1_move_processes_from_waiting_to_ready_if_io_completed(SimulationContex
       p->remaining_time_in_current_input_output_wait -= 1;
 
       if (p->remaining_time_in_current_input_output_wait == 0) {
-        // Vuelve a READY y entra a High (regla 4.2/ingresos)
         p->current_process_state = PROCESS_STATE_READY;
-        p->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
-        push_ready_process_into_process_queue(&c->high_priority_mlfq_queue, p);
 
-        // Resetea burst para la siguiente ráfaga:
+        // Mantener cola (Regla 4)
+        if (p->current_queue_affinity == PROCESS_QUEUE_AFFINITY_HIGH) {
+          push_ready_unique(&c->high_priority_mlfq_queue, p);
+        } else if (p->current_queue_affinity == PROCESS_QUEUE_AFFINITY_LOW) {
+          push_ready_unique(&c->low_priority_mlfq_queue, p);
+        } else {
+          // fallback seguro
+          p->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
+          push_ready_unique(&c->high_priority_mlfq_queue, p);
+        }
+
+        // Preparar siguiente ráfaga
         p->remaining_time_in_current_cpu_burst = p->cpu_burst_duration_per_burst;
+        // IMPORTANTE: NO reiniciar p->remaining_quantum
       }
     }
   }
@@ -83,33 +104,46 @@ void step1_move_processes_from_waiting_to_ready_if_io_completed(SimulationContex
 
 
 void step2_mark_processes_as_dead_if_deadline_reached_in_queues(SimulationContext* c) {
-  Process** process_array = (c->high_priority_mlfq_queue).internal_dynamic_array_of_process_pointers;
-  for (size_t i = 0; i < c->high_priority_mlfq_queue.internal_dynamic_array_size; i++) {
-    if (process_array[i]->absolute_execution_deadline <= c->current_simulation_tick) {
-      if (process_array[i]->current_process_state != PROCESS_STATE_DEAD &&
-          process_array[i]->current_process_state != PROCESS_STATE_FINISHED) {
-        process_array[i]->current_process_state = PROCESS_STATE_DEAD;
-        
-        process_array[i]->time_tick_when_finished_or_dead_for_sorting = c->current_simulation_tick;
-        push_process_into_process_pool(&(c->dead_processes), process_array[i]);
+  // 1) Marcar en colas y remover
+  ProcessQueue* qs[2] = { &c->high_priority_mlfq_queue, &c->low_priority_mlfq_queue };
+  for (int qidx = 0; qidx < 2; ++qidx) {
+    ProcessQueue* q = qs[qidx];
+    for (size_t i = 0; i < q->internal_dynamic_array_size; ) {
+      Process* p = q->internal_dynamic_array_of_process_pointers[i];
+      if (p->absolute_execution_deadline <= c->current_simulation_tick &&
+          p->current_process_state != PROCESS_STATE_DEAD &&
+          p->current_process_state != PROCESS_STATE_FINISHED) {
+
+        p->current_process_state = PROCESS_STATE_DEAD;
+        p->last_time_tick_when_left_cpu = c->current_simulation_tick;
+        p->time_tick_when_finished_or_dead_for_sorting = c->current_simulation_tick;
+        if (p->start_time >= 0)
+          p->turnaround_time = (unsigned long long)(c->current_simulation_tick - p->start_time);
+
+        push_process_into_process_pool(&c->dead_processes, p);
+        remove_process_from_queue(q, i);
+        continue; // no i++
       }
-      // Sácarla de la cola
-      remove_process_from_queue(&(c->high_priority_mlfq_queue), i);
-      i--; // compactada la cola
+      ++i;
     }
   }
-  process_array = (c->low_priority_mlfq_queue).internal_dynamic_array_of_process_pointers;
-  for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
-    if (process_array[i]->absolute_execution_deadline <= c->current_simulation_tick) {
-      if (process_array[i]->current_process_state != PROCESS_STATE_DEAD &&
-          process_array[i]->current_process_state != PROCESS_STATE_FINISHED) {
-        process_array[i]->current_process_state = PROCESS_STATE_DEAD;
-        
-        process_array[i]->time_tick_when_finished_or_dead_for_sorting = c->current_simulation_tick;
-        push_process_into_process_pool(&(c->dead_processes), process_array[i]);
-      }
-      remove_process_from_queue(&(c->low_priority_mlfq_queue), i);
-      i--; 
+
+  // 2) Asegurar DEAD también para procesos WAITING/READY fuera de colas (modelo permisivo)
+  for (unsigned int k = 0; k < c->simulation_input_data.number_of_processes_from_input_file; ++k) {
+    Process* p = c->simulation_input_data.array_of_process_input_records[k].instantiated_process_pointer;
+    if (!p) continue;
+    if (p->current_process_state == PROCESS_STATE_FINISHED ||
+        p->current_process_state == PROCESS_STATE_DEAD) continue;
+
+    if (p->absolute_execution_deadline <= c->current_simulation_tick) {
+      p->current_process_state = PROCESS_STATE_DEAD;
+      p->last_time_tick_when_left_cpu = c->current_simulation_tick;
+      p->time_tick_when_finished_or_dead_for_sorting = c->current_simulation_tick;
+      if (p->start_time >= 0)
+        p->turnaround_time = (unsigned long long)(c->current_simulation_tick - p->start_time);
+
+      push_process_into_process_pool(&c->dead_processes, p);
+      // Si estaba en colas, ya lo removimos arriba; si no, no hacemos nada más.
     }
   }
 }
@@ -124,11 +158,16 @@ void step3_update_currently_running_process_with_ordered_rules(SimulationContext
     if (running->current_process_state != PROCESS_STATE_DEAD &&
         running->current_process_state != PROCESS_STATE_FINISHED) {
       running->current_process_state = PROCESS_STATE_DEAD;
+      running->last_time_tick_when_left_cpu = c->current_simulation_tick;
       running->time_tick_when_finished_or_dead_for_sorting = c->current_simulation_tick;
+      // turnaround = now - T_INICIO
+      if (running->start_time >= 0) {
+        running->turnaround_time = (unsigned long long)(c->current_simulation_tick - running->start_time);
+      }
       push_process_into_process_pool(&(c->dead_processes), running);
+      c->cpu_execution_unit.currently_running_process_pointer = NULL;
+      return;
     }
-    c->cpu_execution_unit.currently_running_process_pointer = NULL;
-    return;
   }
 
   // Avanzar 1 tick de ejecución
@@ -142,15 +181,24 @@ void step3_update_currently_running_process_with_ordered_rules(SimulationContext
   // 3.2) ¿Terminó la ráfaga actual?
   if (running->remaining_time_in_current_cpu_burst == 0) {
     running->number_of_completed_cpu_bursts += 1;
+    running->last_time_tick_when_left_cpu = c->current_simulation_tick;
 
     // ¿Terminó TODAS las ráfagas?
     if (running->number_of_completed_cpu_bursts >= running->total_number_of_cpu_bursts) {
       running->current_process_state = PROCESS_STATE_FINISHED;
       running->time_tick_when_finished_or_dead_for_sorting = c->current_simulation_tick;
+      if (running->start_time >= 0) {
+        running->turnaround_time = (unsigned long long)(c->current_simulation_tick - running->start_time);
+      }
       push_process_into_process_pool(&(c->finished_processes), running);
       c->cpu_execution_unit.currently_running_process_pointer = NULL;
       return;
     }
+
+    running->current_process_state = PROCESS_STATE_WAITING;
+    running->remaining_time_in_current_input_output_wait = running->input_output_wait_time_between_bursts;
+    c->cpu_execution_unit.currently_running_process_pointer = NULL;
+    return;
 
     // Aún quedan ráfagas: pasa a WAITING por IO
     running->current_process_state = PROCESS_STATE_WAITING;
@@ -164,31 +212,30 @@ void step3_update_currently_running_process_with_ordered_rules(SimulationContext
   // 3.3) ¿Se acabó el quantum sin terminar la ráfaga?
   if (running->remaining_quantum == 0) {
     running->current_process_state = PROCESS_STATE_READY;
-    // Democión a Low se hará en paso 4.1
+    running->last_time_tick_when_left_cpu = c->current_simulation_tick;
     c->cpu_execution_unit.currently_running_process_pointer = NULL;
     return;
   }
-}
 
-static void ingress_new_arrivals_into_high_queue_when_start_time_matches_tick(
-  SimulationContext* c
-) {
-  // parte 4.2: cuando tick == T_INICIO, ingresar a High en READY.
-  for (unsigned int i = 0; i < c->simulation_input_data.number_of_processes_from_input_file; i++) {
-    ProcessInputRecord* rec = &c->simulation_input_data.array_of_process_input_records[i];
-    Process* p = rec->instantiated_process_pointer;
-    if (!p) continue;
+  // 3.4) Si hay evento en este tick que involucra a otro PID, preemptar YA.
+  while (c->next_forced_event_index_to_process < c->simulation_input_data.number_of_forced_cpu_events_from_input_file) {
+    ForcedCpuEvent* ev = &c->simulation_input_data.array_of_forced_cpu_events[c->next_forced_event_index_to_process];
+    if ((long long)ev->event_time_tick != c->current_simulation_tick) break;
 
-    if (rec->input_start_time_tick == (unsigned int)c->current_simulation_tick) {
-      p->current_process_state = PROCESS_STATE_READY;
-      p->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
-      p->start_time = c->current_simulation_tick;
-      if (!push_ready_process_into_process_queue(&(c->high_priority_mlfq_queue), p)) printf("fuck\n");
-      p->remaining_quantum = c->high_priority_mlfq_queue.associated_queue_quantum_in_ticks;
-      
+    if (ev->event_process_id != running->process_id) {
+      // Preemptar una sola vez; el target se despacha en step6
+      running->current_process_state = PROCESS_STATE_READY;
+      running->last_time_tick_when_left_cpu = c->current_simulation_tick;
+      running->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
+      running->is_priority_forced_to_maximum_due_to_event = true;
+      running->number_of_preemption_interruptions += 1;
+      push_ready_unique(&c->high_priority_mlfq_queue, running);
+      c->cpu_execution_unit.currently_running_process_pointer = NULL;
     }
+    break; // no consumir el evento aquí; se consume step6
   }
 }
+
 
 
 void step4_ingress_processes_into_queues_according_to_rules(SimulationContext* c) {
@@ -200,8 +247,20 @@ void step4_ingress_processes_into_queues_according_to_rules(SimulationContext* c
         p->remaining_time_in_current_cpu_burst > 0 &&
         p != c->cpu_execution_unit.currently_running_process_pointer) {
 
-      p->current_queue_affinity = PROCESS_QUEUE_AFFINITY_LOW;
-      push_ready_process_into_process_queue(&c->low_priority_mlfq_queue, p);
+      if (p->remaining_quantum == 0) {
+        p->current_queue_affinity = PROCESS_QUEUE_AFFINITY_LOW;
+        push_ready_unique(&c->low_priority_mlfq_queue, p);
+      } else {
+        // Preemptado o cedió por ráfaga → mantiene cola
+        if (p->current_queue_affinity == PROCESS_QUEUE_AFFINITY_HIGH)
+          push_ready_unique(&c->high_priority_mlfq_queue, p);
+        else if (p->current_queue_affinity == PROCESS_QUEUE_AFFINITY_LOW)
+          push_ready_unique(&c->low_priority_mlfq_queue, p);
+        else {
+          p->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
+          push_ready_unique(&c->high_priority_mlfq_queue, p);
+        }
+      }
     }
   }
 
@@ -210,10 +269,13 @@ void step4_ingress_processes_into_queues_according_to_rules(SimulationContext* c
     ProcessInputRecord* rec = &c->simulation_input_data.array_of_process_input_records[i];
     Process* p = rec->instantiated_process_pointer;
     if (!p) continue;
+
     if ((unsigned int)c->current_simulation_tick == rec->input_start_time_tick) {
       p->current_process_state = PROCESS_STATE_READY;
       p->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
-      push_ready_process_into_process_queue(&c->high_priority_mlfq_queue, p);
+      if (p->start_time == LL_SENTINEL) p->start_time = c->current_simulation_tick;
+      p->remaining_quantum = c->high_priority_mlfq_queue.associated_queue_quantum_in_ticks;
+      push_ready_unique(&c->high_priority_mlfq_queue, p);
     }
   }
 
@@ -250,10 +312,10 @@ void step5_recompute_priorities_for_all_ready_processes(SimulationContext* c) {
   }
   qsort_with_tick(c->high_priority_mlfq_queue.internal_dynamic_array_of_process_pointers,
                   c->high_priority_mlfq_queue.internal_dynamic_array_size);
-  if (c->high_priority_mlfq_queue.internal_dynamic_array_size > 0) printf("high\n");
+  // if (c->high_priority_mlfq_queue.internal_dynamic_array_size > 0) printf("high\n");
   for (size_t i = 0; i < c->high_priority_mlfq_queue.internal_dynamic_array_size; i++) {
     Process* p = c->high_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
-    printf("%s, %s, %f\n", p->process_name, p->current_process_state == PROCESS_STATE_READY? "READY": "WAIT", p->priority);
+    // printf("%s, %s, %f\n", p->process_name, p->current_process_state == PROCESS_STATE_READY? "READY": "WAIT", p->priority);
   }
   for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
     Process* p = c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
@@ -264,24 +326,19 @@ void step5_recompute_priorities_for_all_ready_processes(SimulationContext* c) {
   if (c->low_priority_mlfq_queue.internal_dynamic_array_size > 0) printf("low\n");
   for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
     Process* p = c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
-    printf("%s, %s, %f\n",p->process_name, p->current_process_state == PROCESS_STATE_READY? "READY": "WAIT", p->priority);
+    // printf("%s, %s, %f\n",p->process_name, p->current_process_state == PROCESS_STATE_READY? "READY": "WAIT", p->priority);
   }
 }
 
 
 void step6_select_next_process_for_cpu_according_to_priority_order(SimulationContext* c) {
-  // Si alguien sigue en RUNNING, no cambiar
-  Process* current = c->cpu_execution_unit.currently_running_process_pointer;
-  if (current && current->current_process_state == PROCESS_STATE_RUNNING) {
-    return;
-  }
-
-  // 6.1) Procesar eventos del tick
+  // 1) Procesar TODOS los eventos del tick (el último "gana")
+  Process* event_target_to_run = NULL;
   while (c->next_forced_event_index_to_process < c->simulation_input_data.number_of_forced_cpu_events_from_input_file) {
     ForcedCpuEvent* ev = &c->simulation_input_data.array_of_forced_cpu_events[c->next_forced_event_index_to_process];
     if ((long long)ev->event_time_tick != c->current_simulation_tick) break;
 
-    // Buscar proceso objetivo por PID
+    // Buscar target por PID
     Process* target = NULL;
     for (unsigned int i = 0; i < c->simulation_input_data.number_of_processes_from_input_file; ++i) {
       Process* p = c->simulation_input_data.array_of_process_input_records[i].instantiated_process_pointer;
@@ -289,48 +346,80 @@ void step6_select_next_process_for_cpu_according_to_priority_order(SimulationCon
     }
 
     if (target) {
-      // Forzar a RUNNING en High
-      target->current_process_state = PROCESS_STATE_RUNNING;
+      // Asegurar que NO quede en colas dos veces
+      remove_if_present_from_queue(&c->high_priority_mlfq_queue, target);
+      remove_if_present_from_queue(&c->low_priority_mlfq_queue, target);
+
+      // Si estaba en WAITING, el evento lo trae igual a CPU
+      target->remaining_time_in_current_input_output_wait = 0;
       target->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
-      target->remaining_quantum = c->high_priority_mlfq_queue.associated_queue_quantum_in_ticks;
 
-      c->cpu_execution_unit.currently_running_process_pointer = target;
-
-      if (!target->has_ever_entered_cpu_at_least_once) {
-        target->has_ever_entered_cpu_at_least_once = true;
-        target->first_time_tick_when_entered_cpu = c->current_simulation_tick; // <-- marca de primera entrada
-        target->response_time = (unsigned long long)c->current_simulation_tick - target->start_time;
-      }
-
-      c->next_forced_event_index_to_process += 1;
-      return;
-    } else {
-      c->next_forced_event_index_to_process += 1;
+      event_target_to_run = target;  // el último en el mismo tick prevalece
     }
+    c->next_forced_event_index_to_process += 1;
   }
 
-  // 6.2/6.3 Selección normal: High primero, luego Low
-  Process* best_process = pop_best_ready_process_from_process_queue(&c->high_priority_mlfq_queue);
-  if (best_process == NULL) {
-    best_process = pop_best_ready_process_from_process_queue(&c->low_priority_mlfq_queue);
+  // 2) Si hubo evento, despacharlo inmediatamente
+  if (event_target_to_run != NULL) {
+    Process* cur = c->cpu_execution_unit.currently_running_process_pointer;
+    if (cur && cur != event_target_to_run) {
+      // Por si step3 no alcanzó a preemptar (seguro redundante pero inocuo)
+      cur->current_process_state = PROCESS_STATE_READY;
+      cur->last_time_tick_when_left_cpu = c->current_simulation_tick;
+      cur->current_queue_affinity = PROCESS_QUEUE_AFFINITY_HIGH;
+      cur->is_priority_forced_to_maximum_due_to_event = true;
+      cur->number_of_preemption_interruptions += 1;
+      push_ready_unique(&c->high_priority_mlfq_queue, cur);
+    }
+
+    c->cpu_execution_unit.currently_running_process_pointer = event_target_to_run;
+    event_target_to_run->current_process_state = PROCESS_STATE_RUNNING;
+
+    if (!event_target_to_run->has_ever_entered_cpu_at_least_once) {
+      event_target_to_run->has_ever_entered_cpu_at_least_once = true;
+      event_target_to_run->first_time_tick_when_entered_cpu = c->current_simulation_tick;
+      if (event_target_to_run->start_time >= 0)
+        event_target_to_run->response_time = (unsigned long long)(c->current_simulation_tick - event_target_to_run->start_time);
+    }
+
+    if (event_target_to_run->remaining_quantum == 0) {
+      event_target_to_run->remaining_quantum = c->high_priority_mlfq_queue.associated_queue_quantum_in_ticks;
+    }
+    // Si venía con prioridad forzada por evento anterior y por fin entró, no es necesario limpiarla aquí;
+    // la prioridad forzada afecta solo al orden en colas, y ahora no está en cola.
+
+    return;
   }
 
-  c->cpu_execution_unit.currently_running_process_pointer = best_process;
+  // 3) Selección normal: High luego Low (READY)
+  if (c->cpu_execution_unit.currently_running_process_pointer &&
+      c->cpu_execution_unit.currently_running_process_pointer->current_process_state == PROCESS_STATE_RUNNING) {
+    return; // sigue corriendo
+  }
 
-  if (best_process != NULL) {
-    best_process->current_process_state = PROCESS_STATE_RUNNING;
+  Process* best = pop_best_ready_process_from_process_queue(&c->high_priority_mlfq_queue);
+  if (!best) best = pop_best_ready_process_from_process_queue(&c->low_priority_mlfq_queue);
 
-    if (!best_process->has_ever_entered_cpu_at_least_once) {
-      best_process->has_ever_entered_cpu_at_least_once = true;
-      best_process->first_time_tick_when_entered_cpu = c->current_simulation_tick; // <-- marca de primera entrada
-      best_process->response_time = (unsigned long long)c->current_simulation_tick - best_process->start_time;
+  c->cpu_execution_unit.currently_running_process_pointer = best;
+
+  if (best) {
+    best->current_process_state = PROCESS_STATE_RUNNING;
+
+    if (!best->has_ever_entered_cpu_at_least_once) {
+      best->has_ever_entered_cpu_at_least_once = true;
+      best->first_time_tick_when_entered_cpu = c->current_simulation_tick;
+      if (best->start_time >= 0)
+        best->response_time = (unsigned long long)(c->current_simulation_tick - best->start_time);
     }
 
-    if (best_process->current_queue_affinity == PROCESS_QUEUE_AFFINITY_HIGH) {
-      best_process->remaining_quantum = c->high_priority_mlfq_queue.associated_queue_quantum_in_ticks;
-    } else {
-      best_process->remaining_quantum = c->low_priority_mlfq_queue.associated_queue_quantum_in_ticks;
+    if (best->remaining_quantum == 0) {
+      best->remaining_quantum = (best->current_queue_affinity == PROCESS_QUEUE_AFFINITY_HIGH)
+        ? c->high_priority_mlfq_queue.associated_queue_quantum_in_ticks
+        : c->low_priority_mlfq_queue.associated_queue_quantum_in_ticks;
     }
+
+    // Ya ingresó a CPU: limpia bandera de prioridad forzada para su próximo ciclo
+    best->is_priority_forced_to_maximum_due_to_event = false;
   }
 }
 
@@ -379,6 +468,8 @@ void run_simulation_skeleton_main_loop(SimulationContext* c) {
     // (Métrica) acumular waiting por tick para procesos READY en colas:
     accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(&(c->high_priority_mlfq_queue));
     accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(&(c->low_priority_mlfq_queue));
+    
+    accumulate_one_tick_waiting_for_waiting_processes(c); // Métrica waiting para procesos en WAITING
 
     // Orden del scheduler (stubs por ahora):
     step1_move_processes_from_waiting_to_ready_if_io_completed(c);

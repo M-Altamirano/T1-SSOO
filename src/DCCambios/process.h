@@ -4,6 +4,11 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <limits.h>
+
+#define LL_SENTINEL     ((long long)-1)
+#define ULL_SENTINEL    (ULLONG_MAX)
+
 
 typedef enum {        // https://stackoverflow.com/questions/34323130/the-importance-of-c-enumeration-typedef-enum
   PROCESS_STATE_RUNNING,

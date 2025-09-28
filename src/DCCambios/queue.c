@@ -183,3 +183,23 @@ void reorder_queue_by_priority(ProcessQueue* queue, size_t beginning, size_t end
     reorder_queue_by_priority(queue, pivot + 1, end);
   }
 }
+
+
+bool remove_if_present_from_queue(ProcessQueue* queue, Process* p) {
+  if (!queue || !p) return false;
+  for (size_t i = 0; i < queue->internal_dynamic_array_size; ++i) {
+    if (queue->internal_dynamic_array_of_process_pointers[i] == p) {
+      remove_process_from_queue(queue, i);
+      return true;
+    }
+  }
+  return false;
+}
+
+
+bool push_ready_unique(ProcessQueue* queue, Process* p) {
+  if (!queue || !p) return false;
+  if (p->current_process_state != PROCESS_STATE_READY) return false;
+  remove_if_present_from_queue(queue, p);
+  return push_ready_process_into_process_queue(queue, p);
+}

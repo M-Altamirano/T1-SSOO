@@ -55,4 +55,10 @@ void qsort_with_tick(Process** base, size_t nmemb);
 
 void reorder_queue_by_priority(ProcessQueue* queue, size_t beginning, size_t end);
 
+// Elimina p si está presente en la cola (true si lo encontró y eliminó)
+bool remove_if_present_from_queue(ProcessQueue* queue, Process* p);
+
+// Empuja p asegurando que no haya duplicado (solo si p->current_process_state == READY)
+bool push_ready_unique(ProcessQueue* queue, Process* p);
+
 #endif // QUEUE_H
