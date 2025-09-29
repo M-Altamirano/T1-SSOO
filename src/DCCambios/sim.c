@@ -216,22 +216,12 @@ void step5_recompute_priorities_for_all_ready_processes(SimulationContext* c) {
   }
   qsort_with_tick(c->high_priority_mlfq_queue.internal_dynamic_array_of_process_pointers,
                   c->high_priority_mlfq_queue.internal_dynamic_array_size);
-  if (c->high_priority_mlfq_queue.internal_dynamic_array_size > 0) printf("high\n");
-  for (size_t i = 0; i < c->high_priority_mlfq_queue.internal_dynamic_array_size; i++) {
-    Process* p = c->high_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
-    printf("%s, %s, %f\n", p->process_name, p->current_process_state == PROCESS_STATE_READY? "READY": "WAIT", p->priority);
-  }
   for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
     Process* p = c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
     p->priority = compute_effective_priority_value_for_process(p, c->current_simulation_tick);
     }
   qsort_with_tick(c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers,
                   c->low_priority_mlfq_queue.internal_dynamic_array_size);
-  if (c->low_priority_mlfq_queue.internal_dynamic_array_size > 0) printf("low\n");
-  for (size_t i = 0; i < c->low_priority_mlfq_queue.internal_dynamic_array_size; i++) {
-    Process* p = c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers[i];
-    printf("%s, %s, %f\n",p->process_name, p->current_process_state == PROCESS_STATE_READY? "READY": "WAIT", p->priority);
-  }
 }
 
 void step6_select_next_process_for_cpu_according_to_priority_order(SimulationContext* c) {
@@ -305,8 +295,8 @@ void run_simulation_skeleton_main_loop(SimulationContext* c) {
          c->current_simulation_tick < maximum_safety_number_of_ticks_to_prevent_infinite_loops) {
 
     // (Métrica) acumular waiting por tick para procesos READY en colas:
-    accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(&(c->high_priority_mlfq_queue));
-    accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(&(c->low_priority_mlfq_queue));
+    accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(c->high_priority_mlfq_queue.internal_dynamic_array_of_process_pointers, c->high_priority_mlfq_queue.internal_dynamic_array_size);
+    accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(c->low_priority_mlfq_queue.internal_dynamic_array_of_process_pointers, c->low_priority_mlfq_queue.internal_dynamic_array_size);
 
     // Orden del scheduler (stubs por ahora):
     step1_move_processes_from_waiting_to_ready_if_io_completed(c);

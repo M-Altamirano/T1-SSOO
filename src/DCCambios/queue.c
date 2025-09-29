@@ -144,13 +144,13 @@ bool is_process_queue_empty(const ProcessQueue* q) {
 }
 
 void accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(
-  ProcessQueue* q
+  Process** process_array, size_t array_size
 ) {
-  if (!q) return;
+  if (!process_array) return;
   // printf("\n################\n%zu\n", q->internal_dynamic_array_size);
   // for (size_t i = 0; i < q->internal_dynamic_array_capacity; i++) printf("%s, ", q->internal_dynamic_array_of_process_pointers[i] ? q->internal_dynamic_array_of_process_pointers[i]->process_name : "NULL");
-  for (size_t i = 0; i < q->internal_dynamic_array_size; i++) {
-    Process* p = q->internal_dynamic_array_of_process_pointers[i];
+  for (size_t i = 0; i < array_size; i++) {
+    Process* p = process_array[i];
     if (p) {
       p->accumulated_time_in_ready_or_waiting_states += 1ull;
     }

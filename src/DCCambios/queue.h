@@ -48,7 +48,7 @@ bool is_process_queue_empty(const ProcessQueue* queue_pointer);
 // Recorre la cola y acumula +1 tick de waiting para procesos READY en esta cola.
 // (Ayuda con las métricas en el esqueleto de simulación)
 void accumulate_one_tick_of_waiting_time_for_all_ready_processes_in_queue(
-  ProcessQueue* queue_pointer
+  Process** process_array, size_t array_size
 );
 
 void qsort_with_tick(Process** base, size_t nmemb);
