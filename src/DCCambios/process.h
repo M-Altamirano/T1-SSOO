@@ -93,4 +93,6 @@ bool push_process_into_process_pool(
   Process* p
 );
 
+void remove_process_from_pool(ProcessPool* q, size_t index);
+
 #endif // PROCESS_H

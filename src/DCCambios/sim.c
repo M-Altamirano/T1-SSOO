@@ -111,22 +111,23 @@ void step2_mark_processes_as_dead_if_deadline_reached_in_queues(SimulationContex
 void step3_update_currently_running_process_with_ordered_rules(SimulationContext* c) {
   Process* current_running_process = c->cpu_execution_unit.currently_running_process_pointer;
   if (current_running_process == NULL) return;
+  current_running_process->remaining_time_in_current_cpu_burst--;
+  c->cpu_execution_unit.currently_running_process_pointer->remaining_quantum--;
+  if (!(current_running_process->has_ever_entered_cpu_at_least_once)) {
+        current_running_process->has_ever_entered_cpu_at_least_once = true;
+        current_running_process->response_time = (unsigned long long) c->current_simulation_tick - current_running_process->start_time;
+      }
   // 3.1
-  if (current_running_process->absolute_execution_deadline == c->current_simulation_tick) {
+  if (current_running_process->absolute_execution_deadline <= c->current_simulation_tick) {
     current_running_process->current_process_state = PROCESS_STATE_DEAD;
     current_running_process->turnaround_time = c->current_simulation_tick - current_running_process->start_time;
     push_process_into_process_pool(&(c->dead_processes), current_running_process);
 
     c->cpu_execution_unit.currently_running_process_pointer = NULL;
+    printf("what the actual fuck\n");
     return;
   }
   // 3.2
-  current_running_process->remaining_time_in_current_cpu_burst--;
-  c->cpu_execution_unit.currently_running_process_pointer->remaining_quantum--;
-  if (!current_running_process->has_ever_entered_cpu_at_least_once) {
-        current_running_process->has_ever_entered_cpu_at_least_once = true;
-        current_running_process->response_time = (unsigned long long) c->current_simulation_tick - current_running_process->start_time;
-      }
   if (current_running_process->remaining_time_in_current_cpu_burst == 0) {
     current_running_process->number_of_completed_cpu_bursts += (unsigned int) 1;
     if (current_running_process->number_of_completed_cpu_bursts == current_running_process->total_number_of_cpu_bursts) {
@@ -150,11 +151,14 @@ void step3_update_currently_running_process_with_ordered_rules(SimulationContext
     return;
   }
   // 3.4
-  unsigned int next_event_tick = c->simulation_input_data.array_of_forced_cpu_events[c->next_forced_event_index_to_process].event_time_tick;
-  if (c->current_simulation_tick == next_event_tick) {
-    current_running_process->current_process_state = PROCESS_STATE_READY;
-    current_running_process->is_priority_forced_to_maximum_due_to_event = true;
-    current_running_process->number_of_preemption_interruptions++;
+  bool remaining_events = !( c->simulation_input_data.number_of_forced_cpu_events_from_input_file == c->next_forced_event_index_to_process);
+  if (remaining_events) {
+    unsigned int next_event_tick = c->simulation_input_data.array_of_forced_cpu_events[c->next_forced_event_index_to_process].event_time_tick;
+    if (c->current_simulation_tick == next_event_tick) {
+      current_running_process->current_process_state = PROCESS_STATE_READY;
+      current_running_process->is_priority_forced_to_maximum_due_to_event = true;
+      current_running_process->number_of_preemption_interruptions++;
+    }
   }
 }
 
@@ -256,7 +260,7 @@ void step6_select_next_process_for_cpu_according_to_priority_order(SimulationCon
   // }
   if (current_cpu_process == NULL) {
     Process* new_process_in_cpu = NULL;
-    if (c->simulation_input_data.number_of_forced_cpu_events_from_input_file < c->next_forced_event_index_to_process) {
+    if (c->simulation_input_data.number_of_forced_cpu_events_from_input_file > c->next_forced_event_index_to_process) {
       unsigned int next_event_tick = c->simulation_input_data.array_of_forced_cpu_events[c->next_forced_event_index_to_process].event_time_tick;
       if (c->current_simulation_tick == next_event_tick) {
         unsigned int event_id = c->simulation_input_data.array_of_forced_cpu_events[c->next_forced_event_index_to_process].event_process_id;
@@ -278,13 +282,20 @@ void step6_select_next_process_for_cpu_according_to_priority_order(SimulationCon
         }
         p_array = c->dead_processes.internal_dynamic_array_of_process_pointers;
         for (size_t i = 0; i < c->dead_processes.internal_dynamic_array_size; i++) {
-          if (p_array[i]->process_id == event_id) new_process_in_cpu = p_array[i];
+          if (p_array[i]->process_id == event_id) {
+            new_process_in_cpu = p_array[i];
+            remove_process_from_pool(&c->dead_processes, i);
+          }
         }
         p_array = c->finished_processes.internal_dynamic_array_of_process_pointers;
         for (size_t i = 0; i < c->finished_processes.internal_dynamic_array_size; i++) {
-          if (p_array[i]->process_id == event_id) new_process_in_cpu = p_array[i];
+          if (p_array[i]->process_id == event_id) {
+            new_process_in_cpu = p_array[i];
+            remove_process_from_pool(&c->finished_processes, i);
+          }
         }
-        c->next_forced_event_index_to_process++;
+        c->next_forced_event_index_to_process += (size_t) 1;
+        printf("next event: %zu", c->next_forced_event_index_to_process);
       }
     }
     if (c->high_priority_mlfq_queue.internal_dynamic_array_size >= 1 && new_process_in_cpu == NULL) {
@@ -300,6 +311,8 @@ void step6_select_next_process_for_cpu_according_to_priority_order(SimulationCon
     c->cpu_execution_unit.currently_running_process_pointer = new_process_in_cpu;
     if (new_process_in_cpu != NULL) {
       new_process_in_cpu->current_process_state = PROCESS_STATE_RUNNING;
+      printf("CPU PROCESS: %s\n", new_process_in_cpu->process_name);
+      printf("CURRENT EVENT: %zu", c->next_forced_event_index_to_process);
     }
   }
 }
@@ -313,6 +326,7 @@ bool are_all_processes_in_terminal_state_and_no_work_left(const SimulationContex
   if (c->cpu_execution_unit.currently_running_process_pointer != NULL) return false;
   if (!is_process_queue_empty(&c->high_priority_mlfq_queue)) return false;
   if (!is_process_queue_empty(&c->low_priority_mlfq_queue)) return false;
+  if (c->simulation_input_data.number_of_forced_cpu_events_from_input_file > c->next_forced_event_index_to_process) return false;
 
   for (unsigned int i = 0; i < c->simulation_input_data.number_of_processes_from_input_file; i++) {
     Process* p = c->simulation_input_data.array_of_process_input_records[i].instantiated_process_pointer;

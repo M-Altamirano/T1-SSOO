@@ -46,7 +46,7 @@ void initialize_process_simulation_fields(Process* p) {
 
   p->last_time_tick_when_left_cpu = -1;
   p->start_time = -1;
-  p->response_time = -1;
+  p->response_time = 0;
 
   p->accumulated_time_in_ready_or_waiting_states = 0ull;
   p->number_of_preemption_interruptions = 0u;
@@ -109,6 +109,7 @@ bool push_process_into_process_pool(
   Process* p
 ) {
   if (!q || !p) return false;
+  for (size_t i = 0; i < q->internal_dynamic_array_size; i++) if (q->internal_dynamic_array_of_process_pointers[i] == p) return true;
   if (q->internal_dynamic_array_size == q->internal_dynamic_array_capacity) {
     size_t new_cap = (q->internal_dynamic_array_capacity == 0) ? 8 : (q->internal_dynamic_array_capacity * 2);
     Process** new_arr = (Process**)realloc(q->internal_dynamic_array_of_process_pointers, new_cap * sizeof(Process*));
@@ -118,4 +119,21 @@ bool push_process_into_process_pool(
   }
   q->internal_dynamic_array_of_process_pointers[q->internal_dynamic_array_size++] = p;
   return true;
+}
+
+void remove_process_from_pool(ProcessPool* q, size_t index) {
+  if (!q) return;
+  if (index >= q->internal_dynamic_array_size) return; // bounds check
+
+  size_t n = q->internal_dynamic_array_size;
+
+  // Shift everything left one slot (only if index is not the last slot)
+  for (size_t i = index; i + 1 < n; ++i) {
+    q->internal_dynamic_array_of_process_pointers[i] =
+      q->internal_dynamic_array_of_process_pointers[i + 1];
+  }
+
+  // Clear the now-unused last slot and decrement size
+  q->internal_dynamic_array_of_process_pointers[n - 1] = NULL;
+  q->internal_dynamic_array_size = n - 1;
 }

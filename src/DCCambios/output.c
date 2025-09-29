@@ -89,14 +89,15 @@ void write_simulation_output(
       p->accumulated_time_in_ready_or_waiting_states
     );
     printf(
-      "%s,%u,%s,%u,%llu,%llu,%llu\n", 
+      "%s,%u,%s,%u,%llu,%llu,%llu, %d\n", 
       p->process_name, 
       p->process_id, 
       state,
       p->number_of_preemption_interruptions,
       p->turnaround_time,
       p->response_time,
-      p->accumulated_time_in_ready_or_waiting_states
+      p->accumulated_time_in_ready_or_waiting_states,
+      p->has_ever_entered_cpu_at_least_once
     );
   }
 
