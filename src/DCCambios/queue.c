@@ -51,7 +51,6 @@ bool push_ready_process_into_process_queue(
   }
   q->internal_dynamic_array_of_process_pointers[q->internal_dynamic_array_size] = p;
   q->internal_dynamic_array_size += (size_t) 1;
-  printf("%s, %zu\n", p->process_name, q->internal_dynamic_array_size);
   return true;
 }
 
@@ -135,6 +134,7 @@ Process* pop_best_ready_process_from_process_queue(
   // Elimina el último puntero
   q->internal_dynamic_array_of_process_pointers[(q->internal_dynamic_array_size) - 1] = NULL;
   q->internal_dynamic_array_size--;
+  printf("CURRENT PROCESS: %s  prio: %.5lf\n##########\n", best->process_name, best->priority);
 
   return best;
 }

@@ -79,7 +79,7 @@ void write_simulation_output(
     if (p->current_process_state == PROCESS_STATE_DEAD) strcpy(state, "DEAD");
     else strcpy(state, "FINISHED");
     fprintf(output_file, 
-      "%s,%d,%s,%d,%llu,%llu,%llu\n", 
+      "%s,%u,%s,%u,%llu,%llu,%llu\n", 
       p->process_name, 
       p->process_id, 
       state,
@@ -89,7 +89,7 @@ void write_simulation_output(
       p->accumulated_time_in_ready_or_waiting_states
     );
     printf(
-      "%s,%d,%s,%d,%lld,%lld,%lld\n", 
+      "%s,%u,%s,%u,%llu,%llu,%llu\n", 
       p->process_name, 
       p->process_id, 
       state,
@@ -99,6 +99,10 @@ void write_simulation_output(
       p->accumulated_time_in_ready_or_waiting_states
     );
   }
+
+//   for (size_t i = 0; i < dead_pool->internal_dynamic_array_size; i++) printf("%s\n", dead_pool->internal_dynamic_array_of_process_pointers[i]->process_name);
+//   printf("###########\n");
+//   for (size_t i = 0; i < finished_pool->internal_dynamic_array_size; i++) printf("%s\n", finished_pool->internal_dynamic_array_of_process_pointers[i]->process_name);
   fclose(output_file);
   destroy_process_pool(all_processes);
   free(all_processes);

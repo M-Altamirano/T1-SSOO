@@ -85,13 +85,14 @@ double compute_effective_priority_value_for_process(
     return DBL_MAX / 2.0;
   }
 
-  long long time_until_deadline =
-      (long long)p->absolute_execution_deadline - current_simulation_tick;
+  unsigned long long time_until_deadline =
+      p->absolute_execution_deadline > current_simulation_tick?
+      (unsigned long long)p->absolute_execution_deadline - current_simulation_tick : 1.0;
 
   // Evitar división por cero o negativos: si ya está vencido,
   // devolver un valor alto para que se atienda (o lo marcará DEAD en su paso).
   double protective_time_until_deadline =
-      (time_until_deadline <= 0) ? 1.0 : (double)time_until_deadline;
+      (time_until_deadline <= 1.0) ? 1.0 : (double)time_until_deadline;
 
   int remaining_bursts = (int)p->total_number_of_cpu_bursts -
                          (int)p->number_of_completed_cpu_bursts;
